@@ -2,17 +2,19 @@
 
 Callable pulls of Knack tables into `AF_Reporting_Book.xlsm`, all
 using `PullHoursRecords.bas` as the template (page through Knack →
-narrow to the current reporting period → write mapped values into the
-existing sheet, preserving its current column order).
+write mapped values into the existing sheet, preserving its current
+column order).
 
 Knack application: **Anytime Fitness Reporting App**
 (`67a3de417009da15fb223d49`).
 
-| Module | Knack table | Sub to run | Writes into |
-|---|---|---|---|
-| `PullMonthlyTargetsRecords.bas` | Employee Monthly Targets (`object_28`) | `PullMonthlyTargets` | `MonthlyTargets` |
-| `PullCarryOverRecords.bas` | CarryOver (`object_34`) | `PullCarryOver` | `OTCarryOver` |
-| `PullAFDelinquencyRecords.bas` | AFDelinquency (`object_12`) | `PullAFDelinquency` | `afdelinquency` |
+| Module | Knack table | Sub to run | Writes into | Scope |
+|---|---|---|---|---|
+| `PullMonthlyTargetsRecords.bas` | Employee Monthly Targets (`object_28`) | `PullMonthlyTargets` | `MonthlyTargets` | Current reporting period |
+| `PullCarryOverRecords.bas` | CarryOver (`object_34`) | `PullCarryOver` | `OTCarryOver` | Current reporting period |
+| `PullAFDelinquencyRecords.bas` | AFDelinquency (`object_12`) | `PullAFDelinquency` | `afdelinquency` | Current reporting period |
+| `PullLocationsRecords.bas` | Locations (`object_22`) | `PullLocations` | `Area Location` | All active locations |
+| `PullPaidHolidaysRecords.bas` | Paid Holidays (`object_36`) | `PullPaidHolidays` | `PaidHolidays` | All records |
 
 ## ⚠️ Rotate the Knack API key
 
@@ -32,7 +34,7 @@ Knack app. Recommend rotating it now in the Knack Builder:
 
 ## How these modules work
 
-All three follow the same shape:
+All five follow the same shape:
 
 - Each reads the **existing header row** of its target sheet at
   runtime and maps every header it recognizes (by name) to a Knack
@@ -51,16 +53,22 @@ All three follow the same shape:
     (`EmployeeWageCode`/`field_373`), already mapped to the
     `1 AFEmployeeWages_Code` column, so this avoids guessing which of
     the two columns should receive it.
-- Each reads the target reporting period from `VariablesSheet!A2` and
-  narrows to it. `object_28` (Monthly Targets) and `object_34`
-  (CarryOver) have no plain date field, only a connection to
-  `AFReporting_Period`, so those two page in *all* records and filter
-  to the matching period in VBA. `object_12` (AFDelinquency) also has
-  no plain pay-period date field (only the "Pay Period when the
-  Account was Closed" connection), so it's filtered the same way —
-  the one difference is it *does* have a real `Mark for Delete`
-  field, so that part is filtered on Knack's side first (same as
-  `PullHoursRecords`/`PullLeadsRecords` do for their delete fields).
+- The three period-scoped pulls read the target reporting period from
+  `VariablesSheet!A2` and narrow to it. `object_28` (Monthly Targets)
+  and `object_34` (CarryOver) have no plain date field, only a
+  connection to `AFReporting_Period`, so those two page in *all*
+  records and filter to the matching period in VBA. `object_12`
+  (AFDelinquency) also has no plain pay-period date field (only the
+  "Pay Period when the Account was Closed" connection), so it's
+  filtered the same way — the one difference is it *does* have a real
+  `Mark for Delete` field, so that part is filtered on Knack's side
+  first (same as `PullHoursRecords`/`PullLeadsRecords` do for their
+  delete fields).
+- `PullLocationsRecords` and `PullPaidHolidaysRecords` are reference
+  tables, not tied to a reporting period, so neither reads
+  `VariablesSheet`. Locations filters to `Active Location = Yes` on
+  Knack's side; Paid Holidays pulls every record (it's a small table
+  used elsewhere via Month/Year lookups).
 
 ## 1. Import the VBA modules
 
