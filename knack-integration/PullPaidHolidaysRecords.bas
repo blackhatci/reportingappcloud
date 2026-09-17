@@ -10,18 +10,16 @@ Option Explicit
 '
 ' Filtered to the current reporting period, same as the other
 ' period-scoped pulls: reads the target date from
-' VariablesSheet!A2 and keeps only records whose Month/Year
-' fields match. object_36 stores Month/Year as separate plain
-' number fields (not a date), so the match is done in VBA
-' (via CLng, so "8" vs "08" style formatting differences don't
-' cause a mismatch) after pulling the full (small) table,
-' rather than as a Knack-side filter.
+' VariablesSheet!A2 and keeps only records whose AFReporting_Period
+' connection (field_497) matches it - same connected-field
+' technique as PullHoursRecords/PullCarryOverRecords, via
+' ProcessConnRecords.GetConnValue, rather than comparing the
+' separate Month/Year number fields.
 '=========================================================
 
 Private Const HOL_OBJECT_KEY As String = "object_36"
 
-Private Const HOL_FIELD_MONTH As String = "field_495"
-Private Const HOL_FIELD_YEAR As String = "field_496"
+Private Const HOL_FIELD_REPORTING_PERIOD As String = "field_497"
 
 Private Const HOL_VARIABLES_SHEET As String = "VariablesSheet"
 Private Const HOL_OUTPUT_SHEET As String = "PaidHolidays"
@@ -61,11 +59,7 @@ Public Sub PullPaidHolidays()
     Dim rawCount As Long
     rawCount = records.count
 
-    Set records = HolFilterByMonthYear( _
-        records, _
-        Month(targetPeriod), _
-        Year(targetPeriod) _
-    )
+    Set records = HolFilterByConnectedPeriod(records, targetPeriod)
 
     If records.count = 0 Then
 
@@ -111,8 +105,8 @@ Private Function HolDiagnoseEmptyResult( _
 
     Dim msg As String
 
-    msg = "Target month/year (from VariablesSheet!A2): " & _
-        Month(targetPeriod) & "/" & Year(targetPeriod) & vbCrLf & _
+    msg = "Target period (from VariablesSheet!A2): " & _
+        Format$(targetPeriod, "mm/dd/yyyy") & vbCrLf & _
         "Raw object_36 records pulled: " & rawCount & vbCrLf & vbCrLf
 
     If rawCount = 0 Then
@@ -129,9 +123,9 @@ Private Function HolDiagnoseEmptyResult( _
     End If
 
     msg = msg & _
-        "Records were pulled, but none matched the target " & _
-        "month/year. Actual Month/Year values from the records:" & _
-        vbCrLf & vbCrLf
+        "Records were pulled, but none matched the target period " & _
+        "after reading field_497. Sample connection text from the " & _
+        "first few records:" & vbCrLf & vbCrLf
 
     Dim records As Collection
     Set records = HolPullAllRecords()
@@ -145,13 +139,24 @@ Private Function HolDiagnoseEmptyResult( _
         Dim rec As Object
         Set rec = records(i)
 
-        Dim monthText As String
-        Dim yearText As String
+        Dim connectionText As String
+        connectionText = ProcessConnRecords.GetConnValue( _
+            rec, HOL_FIELD_REPORTING_PERIOD _
+        )
 
-        monthText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_MONTH)))
-        yearText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_YEAR)))
+        Dim connectedDate As Date
+        Dim parsedOK As Boolean
+        parsedOK = HolTryExtractDate(connectionText, connectedDate)
 
-        msg = msg & i & ": Month='" & monthText & "' Year='" & yearText & "'" & vbCrLf
+        msg = msg & i & ": '" & connectionText & "'"
+
+        If parsedOK Then
+            msg = msg & " -> parsed as " & Format$(connectedDate, "mm/dd/yyyy")
+        Else
+            msg = msg & " -> COULD NOT PARSE AS A DATE"
+        End If
+
+        msg = msg & vbCrLf
 
         sampleCount = sampleCount + 1
         If sampleCount >= 8 Then Exit For
@@ -163,20 +168,22 @@ Private Function HolDiagnoseEmptyResult( _
 End Function
 
 '=========================================================
-' FILTER TO THE CURRENT PERIOD'S MONTH/YEAR
+' VBA-SIDE CONNECTED REPORTING-PERIOD FILTER
 '=========================================================
 
-Private Function HolFilterByMonthYear( _
+Private Function HolFilterByConnectedPeriod( _
     ByVal sourceRecords As Collection, _
-    ByVal targetMonth As Long, _
-    ByVal targetYear As Long) As Collection
+    ByVal targetPeriod As Date) As Collection
 
     Dim filteredRecords As New Collection
 
     If sourceRecords Is Nothing Then
-        Set HolFilterByMonthYear = filteredRecords
+        Set HolFilterByConnectedPeriod = filteredRecords
         Exit Function
     End If
+
+    Dim requiredDate As Date
+    requiredDate = DateValue(targetPeriod)
 
     Dim i As Long
 
@@ -185,15 +192,16 @@ Private Function HolFilterByMonthYear( _
         Dim rec As Object
         Set rec = sourceRecords(i)
 
-        Dim monthText As String
-        Dim yearText As String
+        Dim connectionText As String
+        connectionText = ProcessConnRecords.GetConnValue( _
+            rec, HOL_FIELD_REPORTING_PERIOD _
+        )
 
-        monthText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_MONTH)))
-        yearText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_YEAR)))
+        Dim connectedDate As Date
 
-        If IsNumeric(monthText) And IsNumeric(yearText) Then
+        If HolTryExtractDate(connectionText, connectedDate) Then
 
-            If CLng(monthText) = targetMonth And CLng(yearText) = targetYear Then
+            If DateValue(connectedDate) = requiredDate Then
                 filteredRecords.Add rec
             End If
 
@@ -201,7 +209,62 @@ Private Function HolFilterByMonthYear( _
 
     Next i
 
-    Set HolFilterByMonthYear = filteredRecords
+    Set HolFilterByConnectedPeriod = filteredRecords
+
+End Function
+
+'=========================================================
+' CONNECTED DATE PARSING
+'=========================================================
+
+Private Function HolTryExtractDate( _
+    ByVal connectionText As String, _
+    ByRef resultDate As Date) As Boolean
+
+    Dim cleanedText As String
+
+    cleanedText = Trim$(connectionText)
+
+    If Len(cleanedText) = 0 Then Exit Function
+
+    If IsDate(cleanedText) Then
+
+        resultDate = CDate(cleanedText)
+        HolTryExtractDate = True
+        Exit Function
+
+    End If
+
+    cleanedText = Replace(cleanedText, Chr$(160), " ")
+    cleanedText = Replace(cleanedText, ",", " ")
+    cleanedText = Replace(cleanedText, ";", " ")
+    cleanedText = Replace(cleanedText, "|", " ")
+    cleanedText = Replace(cleanedText, vbCr, " ")
+    cleanedText = Replace(cleanedText, vbLf, " ")
+
+    Dim pieces() As String
+    pieces = Split(cleanedText, " ")
+
+    Dim i As Long
+
+    For i = LBound(pieces) To UBound(pieces)
+
+        Dim candidate As String
+        candidate = Trim$(pieces(i))
+
+        If Len(candidate) > 0 Then
+
+            If IsDate(candidate) Then
+
+                resultDate = CDate(candidate)
+                HolTryExtractDate = True
+                Exit Function
+
+            End If
+
+        End If
+
+    Next i
 
 End Function
 
