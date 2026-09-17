@@ -4,18 +4,26 @@ Option Explicit
 '=========================================================
 ' PAID HOLIDAYS CONFIGURATION
 '
-' Template: PullHoursRecords.bas, simplified. Pulls Knack
-' object_36 ("Paid Holidays") into the existing "PaidHolidays"
-' sheet, preserving whatever column order is already there.
+' Template: PullHoursRecords.bas. Pulls Knack object_36
+' ("Paid Holidays") into the existing "PaidHolidays" sheet,
+' preserving whatever column order is already there.
 '
-' Like Locations, this is a small reference table (holiday
-' dates used elsewhere via Month/Year lookups), not tied to a
-' single reporting period, so it pulls every record with no
-' VariablesSheet date filter.
+' Filtered to the current reporting period, same as the other
+' period-scoped pulls: reads the target date from
+' VariablesSheet!A2 and keeps only records whose Month/Year
+' fields match. object_36 stores Month/Year as separate plain
+' number fields (not a date), so the match is done in VBA
+' (via CLng, so "8" vs "08" style formatting differences don't
+' cause a mismatch) after pulling the full (small) table,
+' rather than as a Knack-side filter.
 '=========================================================
 
 Private Const HOL_OBJECT_KEY As String = "object_36"
 
+Private Const HOL_FIELD_MONTH As String = "field_495"
+Private Const HOL_FIELD_YEAR As String = "field_496"
+
+Private Const HOL_VARIABLES_SHEET As String = "VariablesSheet"
 Private Const HOL_OUTPUT_SHEET As String = "PaidHolidays"
 
 Private Const HOL_HEADER_ROW As Long = 1
@@ -31,14 +39,30 @@ Public Sub PullPaidHolidays()
 
     On Error GoTo ErrorHandler
 
+    Dim wsVariables As Worksheet
     Dim wsOutput As Worksheet
+
+    Set wsVariables = ThisWorkbook.Worksheets(HOL_VARIABLES_SHEET)
     Set wsOutput = ThisWorkbook.Worksheets(HOL_OUTPUT_SHEET)
+
+    Dim targetPeriod As Date
+
+    targetPeriod = HolRequireDate( _
+        wsVariables.Range("A2").value, _
+        HOL_VARIABLES_SHEET & "!A2" _
+    )
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
 
     Dim records As Collection
     Set records = HolPullAllRecords()
+
+    Set records = HolFilterByMonthYear( _
+        records, _
+        Month(targetPeriod), _
+        Year(targetPeriod) _
+    )
 
     HolWriteMappedRecords records, wsOutput
 
@@ -58,6 +82,79 @@ ErrorHandler:
     Resume CleanExit
 
 End Sub
+
+'=========================================================
+' FILTER TO THE CURRENT PERIOD'S MONTH/YEAR
+'=========================================================
+
+Private Function HolFilterByMonthYear( _
+    ByVal sourceRecords As Collection, _
+    ByVal targetMonth As Long, _
+    ByVal targetYear As Long) As Collection
+
+    Dim filteredRecords As New Collection
+
+    If sourceRecords Is Nothing Then
+        Set HolFilterByMonthYear = filteredRecords
+        Exit Function
+    End If
+
+    Dim i As Long
+
+    For i = 1 To sourceRecords.count
+
+        Dim rec As Object
+        Set rec = sourceRecords(i)
+
+        Dim monthText As String
+        Dim yearText As String
+
+        monthText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_MONTH)))
+        yearText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_YEAR)))
+
+        If IsNumeric(monthText) And IsNumeric(yearText) Then
+
+            If CLng(monthText) = targetMonth And CLng(yearText) = targetYear Then
+                filteredRecords.Add rec
+            End If
+
+        End If
+
+    Next i
+
+    Set HolFilterByMonthYear = filteredRecords
+
+End Function
+
+'=========================================================
+' DATE VALIDATION
+'=========================================================
+
+Private Function HolRequireDate( _
+    ByVal cellValue As Variant, _
+    ByVal cellDescription As String) As Date
+
+    If IsError(cellValue) Then
+
+        Err.Raise _
+            vbObjectError + 3803, _
+            "HolRequireDate", _
+            cellDescription & " contains an Excel error."
+
+    End If
+
+    If Not IsDate(cellValue) Then
+
+        Err.Raise _
+            vbObjectError + 3804, _
+            "HolRequireDate", _
+            cellDescription & " does not contain a valid date."
+
+    End If
+
+    HolRequireDate = DateValue(CDate(cellValue))
+
+End Function
 
 '=========================================================
 ' PULL ALL KNACK PAGES (no filter - small reference table)
