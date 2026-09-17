@@ -13,7 +13,13 @@ Private Const FIELD_ACTIVE_RATE As String = "field_140"
 Private Const FIELD_LOCAL_MANAGER As String = "field_230"
 
 ' object_6
-Private Const FIELD_USER_STATUS As String = "field_30"
+' NOTE: was "field_30" - that field no longer exists on object_6 in
+' Knack (confirmed against the live schema). The real "User Status"
+' field key is "field_40". With the stale key, GetFieldValue silently
+' returned blank for every manager (missing fields don't error), so
+' every manager was treated as inactive, PullActEmpWages always came
+' back empty, and nothing was ever written - with no error anywhere.
+Private Const FIELD_USER_STATUS As String = "field_40"
 
 Private Const ROWS_PER_PAGE As Long = 100
 
