@@ -58,11 +58,28 @@ Public Sub PullPaidHolidays()
     Dim records As Collection
     Set records = HolPullAllRecords()
 
+    Dim rawCount As Long
+    rawCount = records.count
+
     Set records = HolFilterByMonthYear( _
         records, _
         Month(targetPeriod), _
         Year(targetPeriod) _
     )
+
+    If records.count = 0 Then
+
+        Application.EnableEvents = True
+        Application.ScreenUpdating = True
+
+        MsgBox _
+            HolDiagnoseEmptyResult(rawCount, targetPeriod), _
+            vbExclamation, _
+            "Paid Holidays Pull - No Matching Records"
+
+        Exit Sub
+
+    End If
 
     HolWriteMappedRecords records, wsOutput
 
@@ -82,6 +99,68 @@ ErrorHandler:
     Resume CleanExit
 
 End Sub
+
+'=========================================================
+' SELF-DIAGNOSIS - builds a message explaining exactly why zero
+' records matched, using real data from the actual pull.
+'=========================================================
+
+Private Function HolDiagnoseEmptyResult( _
+    ByVal rawCount As Long, _
+    ByVal targetPeriod As Date) As String
+
+    Dim msg As String
+
+    msg = "Target month/year (from VariablesSheet!A2): " & _
+        Month(targetPeriod) & "/" & Year(targetPeriod) & vbCrLf & _
+        "Raw object_36 records pulled: " & rawCount & vbCrLf & vbCrLf
+
+    If rawCount = 0 Then
+
+        msg = msg & _
+            "The Knack pull itself returned zero records for " & _
+            "object_36 (Paid Holidays). Check the Paid Holidays " & _
+            "table directly in the Knack Builder to confirm it has " & _
+            "records."
+
+        HolDiagnoseEmptyResult = msg
+        Exit Function
+
+    End If
+
+    msg = msg & _
+        "Records were pulled, but none matched the target " & _
+        "month/year. Actual Month/Year values from the records:" & _
+        vbCrLf & vbCrLf
+
+    Dim records As Collection
+    Set records = HolPullAllRecords()
+
+    Dim sampleCount As Long
+    sampleCount = 0
+
+    Dim i As Long
+    For i = 1 To records.count
+
+        Dim rec As Object
+        Set rec = records(i)
+
+        Dim monthText As String
+        Dim yearText As String
+
+        monthText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_MONTH)))
+        yearText = Trim$(CStr(ProcessConnRecords.GetFieldValue(rec, HOL_FIELD_YEAR)))
+
+        msg = msg & i & ": Month='" & monthText & "' Year='" & yearText & "'" & vbCrLf
+
+        sampleCount = sampleCount + 1
+        If sampleCount >= 8 Then Exit For
+
+    Next i
+
+    HolDiagnoseEmptyResult = msg
+
+End Function
 
 '=========================================================
 ' FILTER TO THE CURRENT PERIOD'S MONTH/YEAR
