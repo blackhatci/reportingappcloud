@@ -20,6 +20,7 @@ Private Const FIELD_LOCAL_MANAGER As String = "field_230"
 ' every manager was treated as inactive, PullActEmpWages always came
 ' back empty, and nothing was ever written - with no error anywhere.
 Private Const FIELD_USER_STATUS As String = "field_40"
+Private Const FIELD_MANAGER_NAME As String = "field_37"
 
 Private Const ROWS_PER_PAGE As Long = 100
 
@@ -431,9 +432,20 @@ Private Function PullObject15ActiveRates() As Collection
 End Function
 
 '=========================================================
-' BUILD LOOKUP OF ACTIVE OBJECT 6 MANAGERS (unchanged)
+' BUILD LOOKUP OF ACTIVE OBJECT 6 MANAGERS
 '
-' Key = object_6 Knack record ID
+' Key = normalized manager name (NOT record ID - see note below)
+'
+' REWRITTEN: field_230 (the Local Manager connection on object_15)
+' comes back from this Knack account as a plain formatted STRING,
+' not a connection object/Collection with an "id" - confirmed by
+' debugging a live record. There is no connected record ID to key
+' off of here. This mirrors how the rest of the workbook already
+' matches managers (CalcModule's dLocalmgr Dictionary is keyed by
+' manager NAME, not ID), so this now does the same, using the
+' existing ProcessConnRecords helpers that already know how to
+' pull clean text out of a Knack field regardless of whether it
+' arrives as a string, a Dictionary, or a Collection.
 '=========================================================
 
 Private Function BuildActiveManagerLookup() As Object
@@ -475,9 +487,12 @@ Private Function BuildActiveManagerLookup() As Object
 
         If parsed.Exists("records") Then
 
-            Dim rec As Variant
+            Dim rec As Object
 
-            For Each rec In parsed("records")
+            Dim rawRec As Variant
+            For Each rawRec In parsed("records")
+
+                Set rec = rawRec
 
                 Dim userStatus As String
 
@@ -495,26 +510,27 @@ Private Function BuildActiveManagerLookup() As Object
                     vbTextCompare _
                 ) = 0 Then
 
-                    If rec.Exists("id") Then
+                    Dim managerName As String
 
-                        Dim managerID As String
+                    managerName = _
+                        ProcessConnRecords.NormalizeConnectionText( _
+                            CStr(ProcessConnRecords.GetFieldValue( _
+                                rec, _
+                                FIELD_MANAGER_NAME _
+                            )) _
+                        )
 
-                        managerID = _
-                            Trim$(CStr(rec("id")))
+                    If Len(managerName) > 0 Then
 
-                        If Len(managerID) > 0 Then
-
-                            If Not lookup.Exists(managerID) Then
-                                lookup.Add managerID, True
-                            End If
-
+                        If Not lookup.Exists(managerName) Then
+                            lookup.Add managerName, True
                         End If
 
                     End If
 
                 End If
 
-            Next rec
+            Next rawRec
 
         End If
 
@@ -527,7 +543,10 @@ Private Function BuildActiveManagerLookup() As Object
 End Function
 
 '=========================================================
-' CHECK OBJECT 15 LOCAL MANAGER CONNECTION (unchanged)
+' CHECK OBJECT 15 LOCAL MANAGER CONNECTION
+'
+' REWRITTEN to match by name via ProcessConnRecords.GetFieldValue,
+' same reasoning as BuildActiveManagerLookup above.
 '=========================================================
 
 Private Function Object15ManagerIsActive( _
@@ -540,84 +559,18 @@ Private Function Object15ManagerIsActive( _
         Exit Function
     End If
 
-    Dim connectionValue As Variant
+    Dim managerName As String
 
-    If IsObject(rec(FIELD_LOCAL_MANAGER)) Then
+    managerName = _
+        ProcessConnRecords.NormalizeConnectionText( _
+            CStr(ProcessConnRecords.GetFieldValue( _
+                rec, _
+                FIELD_LOCAL_MANAGER _
+            )) _
+        )
 
-        ' Handle Knack connection collection.
-        If TypeName(rec(FIELD_LOCAL_MANAGER)) = "Collection" Then
+    If Len(managerName) = 0 Then Exit Function
 
-            Dim connections As Collection
-            Set connections = rec(FIELD_LOCAL_MANAGER)
-
-            Dim item As Variant
-
-            For Each item In connections
-
-                If ConnectionIDIsActive( _
-                    item, _
-                    activeManagerLookup _
-                ) Then
-
-                    Object15ManagerIsActive = True
-                    Exit Function
-
-                End If
-
-            Next item
-
-        Else
-
-            ' Handle single connected record object.
-            If ConnectionIDIsActive( _
-                rec(FIELD_LOCAL_MANAGER), _
-                activeManagerLookup _
-            ) Then
-
-                Object15ManagerIsActive = True
-
-            End If
-
-        End If
-
-    End If
-
-End Function
-
-'=========================================================
-' READ CONNECTED RECORD ID (unchanged)
-'=========================================================
-
-Private Function ConnectionIDIsActive( _
-    ByVal connectionItem As Variant, _
-    ByVal activeManagerLookup As Object) As Boolean
-
-    If Not IsObject(connectionItem) Then
-        Exit Function
-    End If
-
-    On Error GoTo NotActive
-
-    If connectionItem.Exists("id") Then
-
-        Dim connectedID As String
-
-        connectedID = _
-            Trim$(CStr(connectionItem("id")))
-
-        If Len(connectedID) > 0 Then
-
-            ConnectionIDIsActive = _
-                activeManagerLookup.Exists(connectedID)
-
-        End If
-
-    End If
-
-    Exit Function
-
-NotActive:
-
-    ConnectionIDIsActive = False
+    Object15ManagerIsActive = activeManagerLookup.Exists(managerName)
 
 End Function
