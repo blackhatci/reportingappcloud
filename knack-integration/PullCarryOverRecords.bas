@@ -11,13 +11,15 @@ Option Explicit
 '
 ' object_34 has no plain date field - only a connection to
 ' AFReporting_Period - so every record is paged in and then
-' filtered in VBA to the period in VariablesSheet!A2, the same
-' technique used for Monthly Targets.
+' filtered in VBA to the period in VariablesSheet!B2 (the PRIOR
+' period - carryover records are tagged to the period the hours
+' carried over FROM, not the current period in A2).
 '=========================================================
 
 Private Const CO_OBJECT_KEY As String = "object_34"
 
-' Connected reporting-period field, matched against VariablesSheet!A2.
+' Connected reporting-period field, matched against VariablesSheet!B2
+' (the prior period).
 Private Const CO_FIELD_REPORTING_PERIOD As String = "field_436"
 
 Private Const CO_VARIABLES_SHEET As String = "VariablesSheet"
@@ -42,11 +44,15 @@ Public Sub PullCarryOver()
     Set wsVariables = ThisWorkbook.Worksheets(CO_VARIABLES_SHEET)
     Set wsOutput = ThisWorkbook.Worksheets(CO_OUTPUT_SHEET)
 
+    ' OT Carryover records are tagged to the PRIOR period
+    ' (VariablesSheet!B2), not the current period (A2) - these
+    ' are hours carried over FROM the prior period into the
+    ' current one.
     Dim targetPeriod As Date
 
     targetPeriod = CoRequireDate( _
-        wsVariables.Range("A2").value, _
-        CO_VARIABLES_SHEET & "!A2" _
+        wsVariables.Range("B2").value, _
+        CO_VARIABLES_SHEET & "!B2" _
     )
 
     Application.ScreenUpdating = False
@@ -205,7 +211,7 @@ Private Function CoDiagnoseEmptyResult( _
 
     Dim msg As String
 
-    msg = "Target period (VariablesSheet!A2): " & _
+    msg = "Target period (VariablesSheet!B2, the prior period): " & _
         Format$(targetPeriod, "mm/dd/yyyy") & vbCrLf & _
         "Raw object_34 records pulled: " & rawCount & vbCrLf & vbCrLf
 
