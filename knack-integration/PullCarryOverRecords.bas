@@ -56,7 +56,24 @@ Public Sub PullCarryOver()
 
     Set records = CoPullAllRecords()
 
+    Dim rawCount As Long
+    rawCount = records.count
+
     Set records = CoFilterByConnectedPeriod(records, targetPeriod)
+
+    If records.count = 0 Then
+
+        Application.EnableEvents = True
+        Application.ScreenUpdating = True
+
+        MsgBox _
+            CoDiagnoseEmptyResult(rawCount, targetPeriod), _
+            vbExclamation, _
+            "OT Carryover Pull - No Matching Records"
+
+        Exit Sub
+
+    End If
 
     CoWriteMappedRecords records, wsOutput
 
@@ -173,6 +190,82 @@ Private Function CoFilterByConnectedPeriod( _
     Next i
 
     Set CoFilterByConnectedPeriod = filteredRecords
+
+End Function
+
+'=========================================================
+' SELF-DIAGNOSIS - builds a message explaining exactly why zero
+' records matched, using real data from the actual pull, so this
+' doesn't require a separate manual debug pass.
+'=========================================================
+
+Private Function CoDiagnoseEmptyResult( _
+    ByVal rawCount As Long, _
+    ByVal targetPeriod As Date) As String
+
+    Dim msg As String
+
+    msg = "Target period (VariablesSheet!A2): " & _
+        Format$(targetPeriod, "mm/dd/yyyy") & vbCrLf & _
+        "Raw object_34 records pulled: " & rawCount & vbCrLf & vbCrLf
+
+    If rawCount = 0 Then
+
+        msg = msg & _
+            "The Knack pull itself returned zero records for " & _
+            "object_34 (CarryOver). This is not a filtering issue - " & _
+            "either the table is genuinely empty right now, or the " & _
+            "API call itself is failing silently. Check the " & _
+            "CarryOver table directly in the Knack Builder to " & _
+            "confirm it has records."
+
+        CoDiagnoseEmptyResult = msg
+        Exit Function
+
+    End If
+
+    msg = msg & _
+        "Records were pulled, but none matched the target period " & _
+        "after reading field_436. Sample connection text from the " & _
+        "first few records:" & vbCrLf & vbCrLf
+
+    Dim records As Collection
+    Set records = CoPullAllRecords()
+
+    Dim sampleCount As Long
+    sampleCount = 0
+
+    Dim i As Long
+    For i = 1 To records.count
+
+        Dim rec As Object
+        Set rec = records(i)
+
+        Dim connectionText As String
+        connectionText = ProcessConnRecords.GetConnValue( _
+            rec, CO_FIELD_REPORTING_PERIOD _
+        )
+
+        Dim connectedDate As Date
+        Dim parsedOK As Boolean
+        parsedOK = CoTryExtractDate(connectionText, connectedDate)
+
+        msg = msg & i & ": '" & connectionText & "'"
+
+        If parsedOK Then
+            msg = msg & " -> parsed as " & Format$(connectedDate, "mm/dd/yyyy")
+        Else
+            msg = msg & " -> COULD NOT PARSE AS A DATE"
+        End If
+
+        msg = msg & vbCrLf
+
+        sampleCount = sampleCount + 1
+        If sampleCount >= 5 Then Exit For
+
+    Next i
+
+    CoDiagnoseEmptyResult = msg
 
 End Function
 
