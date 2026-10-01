@@ -38,11 +38,15 @@ Option Explicit
 ' equation fields (hardcoded to 0 server-side) and are not sent
 ' either - writing to a formula field has no effect in Knack.
 '
-' NOTE: object_28 also has an Area connection (field_940), but the
-' MonthlyTargets sheet has no Area column to source it from, so it
-' is left unset on the new record (Area is not a required field).
-' If Area needs to be populated here, tell me and I'll add a lookup
-' through the Location's own current Area.
+' object_28 also has an Area connection (field_940). The
+' MonthlyTargets sheet has no Area column to source it from, so it's
+' resolved through the Location's own CURRENT Area connection via
+' KnackUploadHelpers.ResolveLocationAreaId - the new record always
+' gets whatever Area the Location is in right now, regardless of
+' what Area the outgoing record was tagged with. If that lookup
+' doesn't resolve (e.g. the Location record itself has no Area set),
+' field_940 is simply omitted rather than blocking the row - Area is
+' not a required field on object_28.
 '=========================================================
 
 Private Const MTGT_OBJECT_KEY As String = "object_28"
@@ -210,21 +214,37 @@ Private Sub UploadOneTargetRow( _
     Dim priorMonthDuesTap As Variant
     priorMonthDuesTap = wsSource.Cells(rowNumber, COL_CURRENT_MONTH_DUES_TAP).value
 
+    ' Area isn't on the MonthlyTargets sheet, so it's resolved
+    ' through the Location's own current Area connection. A miss
+    ' here doesn't skip the row - Area is optional on object_28 and
+    ' everything else about the record is still valid.
+    Dim areaId As String
+    areaId = KnackUploadHelpers.ResolveLocationAreaId(locationName, cache)
+
+    ' Built with AppendJsonField/BuildJsonObject (not raw string
+    ' concatenation) specifically because field_940 (Area) is
+    ' optional and must be omitted entirely when unresolved - a
+    ' blank value spliced into a hand-built string would produce
+    ' invalid JSON ("field_940":,).
+    Dim f As Collection
+    Set f = KnackUploadHelpers.NewJsonFragments()
+
+    KnackUploadHelpers.AppendJsonField f, "field_368", KnackUploadHelpers.ConnectionJsonValue(locationId)
+    KnackUploadHelpers.AppendJsonField f, "field_364", KnackUploadHelpers.ConnectionJsonValue(managerId)
+    KnackUploadHelpers.AppendJsonField f, "field_367", KnackUploadHelpers.ConnectionJsonValue(nextPeriodId)
+    KnackUploadHelpers.AppendJsonField f, "field_940", KnackUploadHelpers.ConnectionJsonValue(areaId)
+    KnackUploadHelpers.AppendJsonField f, "field_366", KnackUploadHelpers.JsonNumber(wsSource.Cells(rowNumber, COL_TARGET).value)
+    KnackUploadHelpers.AppendJsonField f, "field_365", KnackUploadHelpers.JsonNumber(priorMonthDuesTap)
+    KnackUploadHelpers.AppendJsonField f, "field_390", "0"
+    KnackUploadHelpers.AppendJsonField f, "field_387", KnackUploadHelpers.JsonString(Year(nextPeriod))
+    KnackUploadHelpers.AppendJsonField f, "field_385", KnackUploadHelpers.JsonString(Format$(nextPeriod, "mm"))
+    KnackUploadHelpers.AppendJsonField f, "field_393", "0"
+    KnackUploadHelpers.AppendJsonField f, "field_394", "0"
+    KnackUploadHelpers.AppendJsonField f, "field_395", "0"
+    KnackUploadHelpers.AppendJsonField f, "field_478", "0"
+
     Dim recordJson As String
-    recordJson = "{" & _
-        """field_368"":" & KnackUploadHelpers.ConnectionJsonValue(locationId) & "," & _
-        """field_364"":" & KnackUploadHelpers.ConnectionJsonValue(managerId) & "," & _
-        """field_367"":" & KnackUploadHelpers.ConnectionJsonValue(nextPeriodId) & "," & _
-        """field_366"":" & KnackUploadHelpers.JsonNumber(wsSource.Cells(rowNumber, COL_TARGET).value) & "," & _
-        """field_365"":" & KnackUploadHelpers.JsonNumber(priorMonthDuesTap) & "," & _
-        """field_390"":0," & _
-        """field_387"":" & KnackUploadHelpers.JsonString(Year(nextPeriod)) & "," & _
-        """field_385"":" & KnackUploadHelpers.JsonString(Format$(nextPeriod, "mm")) & "," & _
-        """field_393"":0," & _
-        """field_394"":0," & _
-        """field_395"":0," & _
-        """field_478"":0" & _
-        "}"
+    recordJson = KnackUploadHelpers.BuildJsonObject(f)
 
     KnackAPI.KnackCreateRecord MTGT_OBJECT_KEY, recordJson
 

@@ -129,6 +129,72 @@ Public Function ResolveAreaId( _
 
 End Function
 
+' Resolves a Location's CURRENT Area to an object_23 record id, by
+' looking up the Location record and reading its own Area
+' connection (field_215) - the same field PullLocationsRecords.bas
+' already reads successfully, where it comes back as the Area's
+' plain identifier text (e.g. "2"), not a connection object. That
+' text is then resolved to an object_23 id via ResolveAreaId, same
+' as everywhere else an Area number is resolved.
+'
+' Two-hop lookup (Location -> its Area text -> Area record id), so
+' the combined result is cached under its own key to avoid repeating
+' both hops for the same Location more than once per run.
+Public Function ResolveLocationAreaId( _
+    ByVal locationName As String, ByVal cache As Object) As String
+
+    Dim cleanName As String
+    cleanName = Trim$(locationName)
+
+    If Len(cleanName) = 0 Then Exit Function
+
+    Dim cacheKey As String
+    cacheKey = "LocationArea|" & cleanName
+
+    If cache.Exists(cacheKey) Then
+        ResolveLocationAreaId = cache(cacheKey)
+        Exit Function
+    End If
+
+    Dim filtersJson As String
+    filtersJson = "[{""field"":""" & FIELD_LOCATION_NAME & """," & _
+        """operator"":""is""," & _
+        """value"":""" & Replace(cleanName, """", "\""") & """}]"
+
+    Dim responseText As String
+    responseText = KnackAPI.GetRecordsByFilters(OBJ_LOCATIONS, filtersJson, 1, 1)
+
+    Dim parsed As Object
+    Set parsed = JsonConverter.ParseJson(responseText)
+
+    Dim resolvedId As String
+
+    If parsed.Exists("records") Then
+        Dim records As Variant
+        Set records = parsed("records")
+        If records.count > 0 Then
+
+            Dim locationRec As Object
+            Set locationRec = records(1)
+
+            Dim areaNumberText As String
+            areaNumberText = Trim$(CStr( _
+                ProcessConnRecords.GetFieldValue(locationRec, "field_215") _
+            ))
+
+            If Len(areaNumberText) > 0 Then
+                resolvedId = ResolveAreaId(areaNumberText, cache)
+            End If
+
+        End If
+    End If
+
+    cache.Add cacheKey, resolvedId
+
+    ResolveLocationAreaId = resolvedId
+
+End Function
+
 Public Function ResolvePeriodId( _
     ByVal periodDate As Date, ByVal cache As Object) As String
 
